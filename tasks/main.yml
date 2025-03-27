@@ -1,0 +1,90 @@
+- name: Create CA if it doesn't exist yet
+  when: ca_private_key is undefined
+  block:
+    - name: Create private key with password protection
+      community.crypto.openssl_privatekey_pipe:
+        size: 2048
+        type: RSA
+        passphrase: "{{ lookup('ansible.builtin.env', 'CA_PASSPHRASE', default=ca_passphrase) }}"
+      register: output
+      no_log: true
+      delegate_to: localhost
+
+    - name: Create certificate signing request (CSR) for CA certificate
+      community.crypto.openssl_csr_pipe:
+        privatekey_content: "{{ output.privatekey }}"
+        privatekey_passphrase: "{{ lookup('ansible.builtin.env', 'CA_PASSPHRASE', default=ca_passphrase) }}"
+        common_name: Ansible CA
+        use_common_name_for_san: false  # since we do not specify SANs, don't use CN as a SAN
+        basic_constraints:
+          - 'CA:TRUE'
+        basic_constraints_critical: true
+        key_usage:
+          - keyCertSign
+        key_usage_critical: true
+      register: ca_csr
+      delegate_to: localhost
+
+    - name: Create self-signed CA certificate from CSR
+      community.crypto.x509_certificate_pipe:
+        csr_content: "{{ ca_csr.csr }}"
+        privatekey_content: "{{ output.privatekey }}"
+        privatekey_passphrase: "{{ lookup('ansible.builtin.env', 'CA_PASSPHRASE', default=ca_passphrase) }}"
+        provider: selfsigned
+      register: ca
+      delegate_to: localhost
+
+    - name: Store the CA for future use
+      ansible.builtin.debug:
+        msg:
+          ca_private_key: "{{ output.privatekey }}"
+          ca_certificate: "{{ ca.certificate }}"
+      delegate_to: localhost
+
+    - name: Set the CA variables
+      ansible.builtin.set_fact:
+        ca_private_key: "{{ output.privatekey }}"
+        ca_certificate: "{{ ca.certificate }}"
+      delegate_to: localhost
+
+- name: Create private key
+  community.crypto.openssl_privatekey_pipe:
+    size: 2048
+    type: RSA
+  register: leaf_key
+  no_log: true
+  delegate_to: localhost
+
+- name: Create certificate signing request
+  community.crypto.openssl_csr_pipe:
+    privatekey_content: "{{ leaf_key.privatekey }}"
+    common_name: hostname
+    use_common_name_for_san: true
+    basic_constraints_critical: true
+    key_usage:
+      - digitalSignature
+      - keyEncipherment
+    key_usage_critical: true
+    extended_key_usage:
+      - serverAuth
+  register: leaf_csr
+  delegate_to: localhost
+
+- name: Sign certificate with our CA
+  community.crypto.x509_certificate_pipe:
+    csr_content: "{{ leaf_csr.csr }}"
+    provider: ownca
+    ownca_content: "{{ ca_certificate }}"
+    ownca_privatekey_content: "{{ ca_private_key }}"
+    ownca_privatekey_passphrase: "{{ lookup('ansible.builtin.env', 'CA_PASSPHRASE', default=ca_passphrase) }}"
+    ownca_not_after: +365d  # valid for one year
+    ownca_not_before: "-1d"  # valid since yesterday
+  delegate_to: localhost
+  register: leaf
+
+- name: Show the certificate and key
+  ansible.builtin.debug:
+    msg:
+      key: "{{ leaf_key.privatekey }}"
+      cert: "{{ leaf.certificate }}"
+  delegate_to: localhost
