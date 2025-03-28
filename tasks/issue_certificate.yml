@@ -1,0 +1,38 @@
+- name: Create private key
+  community.crypto.openssl_privatekey_pipe:
+    size: 2048
+    type: RSA
+  register: leaf_key
+  no_log: true
+  delegate_to: localhost
+
+- name: Create certificate signing request
+  community.crypto.openssl_csr_pipe:
+    privatekey_content: "{{ leaf_key.privatekey }}"
+    common_name: "{{ sans[0] }}"
+    subject_alt_name: "{{ sans }}"
+    basic_constraints_critical: true
+    key_usage: "{{ key_usage }}"
+    key_usage_critical: "{{ key_usage_critical }}"
+    extended_key_usage: "{{ extended_key_usage }}"
+  register: leaf_csr
+  delegate_to: localhost
+
+- name: Sign certificate with our CA
+  community.crypto.x509_certificate_pipe:
+    csr_content: "{{ leaf_csr.csr }}"
+    provider: ownca
+    ownca_content: "{{ ca_certificate }}"
+    ownca_privatekey_content: "{{ ca_private_key }}"
+    ownca_privatekey_passphrase: "{{ lookup('ansible.builtin.env', 'CA_PASSPHRASE', default=ca_passphrase) }}"
+    ownca_not_after: "{{ not_after }}"  # valid for one year
+    # ownca_not_before: "-1d"  # valid since yesterday
+  delegate_to: localhost
+  register: leaf
+
+# - name: Show the certificate and key
+#   ansible.builtin.debug:
+#     msg:
+#       key: "{{ leaf_key.privatekey }}"
+#       cert: "{{ leaf.certificate }}"
+#   delegate_to: localhost
