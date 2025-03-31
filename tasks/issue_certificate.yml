@@ -9,7 +9,7 @@
 - name: Create certificate signing request
   community.crypto.openssl_csr_pipe:
     privatekey_content: "{{ leaf_key.privatekey }}"
-    common_name: "{{ sans[0] }}"
+    common_name: "{{ sans[0].split(':')[1] }}"
     subject_alt_name: "{{ sans }}"
     basic_constraints_critical: true
     key_usage: "{{ key_usage }}"
