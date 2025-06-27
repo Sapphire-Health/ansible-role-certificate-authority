@@ -1,0 +1,60 @@
+- name: Ensure local cert output dir exists
+  ansible.builtin.file:
+    path: "{{ cert_output_dir }}"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  run_once: true
+
+- name: Set cert name
+  ansible.builtin.set_fact:
+    cert_name: "{{ sans[0].split(':')[1] }}"
+
+- name: Set cert file paths
+  ansible.builtin.set_fact:
+    cert_path: "{{ cert_output_dir }}/{{ cert_name }}.crt"
+    key_path: "{{ cert_output_dir }}/{{ cert_name }}.key"
+    pfx_path: "{{ cert_output_dir }}/{{ cert_name }}.pfx"
+
+- name: Include certificate issuing logic
+  ansible.builtin.include_tasks: issue_certificate.yml
+
+- name: Write certificate to file
+  ansible.builtin.copy:
+    content: "{{ leaf.certificate }}"
+    dest: "{{ cert_path }}"
+    mode: '0600'
+  delegate_to: localhost
+
+- name: Write private key to file
+  ansible.builtin.copy:
+    content: "{{ leaf_key.privatekey }}"
+    dest: "{{ key_path }}"
+    mode: '0600'
+  delegate_to: localhost
+
+- name: Create PKCS#12 PFX file
+  community.crypto.openssl_pkcs12:
+    path: "{{ pfx_path }}"
+    certificate_path: "{{ cert_path }}"
+    privatekey_path: "{{ key_path }}"
+    friendly_name: "{{ cert_name }}"
+    passphrase: "{{ pfx_password }}"
+  delegate_to: localhost
+
+- name: Ensure target folder exists on Windows host
+  ansible.windows.win_file:
+    path: "{{ windows_cert_path }}"
+    state: directory
+
+- name: Copy PFX to Windows host
+  ansible.windows.win_copy:
+    src: "{{ pfx_path }}"
+    dest: "{{ windows_cert_path }}\\{{ cert_name }}.pfx"
+
+- name: Clean up certificate output directory on Ansible
+  ansible.builtin.file:
+    path: "{{ cert_output_dir }}"
+    state: absent
+  delegate_to: localhost
+  run_once: true
