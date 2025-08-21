@@ -58,3 +58,4 @@
     state: absent
   delegate_to: localhost
   run_once: true
+  when: not (nocleanup | default(false))
